@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<!--
+  dashboard.html — Pure HTML/CSS/JS client for the OCR Toolkit API.
+
+  Works exactly like streamlit_client.py, but with NO Streamlit / no Python on
+  the viewer's side. It just calls the same FastAPI backend (api_server.py):
+      GET  /health      GET /languages      POST /ocr
+
+  How to use
+  ----------
+  1. Start the backend (where Tesseract lives):
+        uvicorn api_server:app --host 0.0.0.0 --port 8000
+     (api_server already sets CORS allow_origins=["*"], so a browser can call it.)
+  2. Open this file:
+        - simplest: double-click dashboard.html (opens as file://), OR
+        - served by the API at http://SERVER:8000/  (see api_server mount), OR
+        - any static host.
+  3. Set the API URL in the top bar (default http://localhost:8000), upload a
+     file, choose options, and click "Run OCR".
+
+  Everything (preprocessing auto/manual, table mode, multi-format export, speed
+  knobs, downloads) mirrors the Streamlit client.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>OCR Toolkit — Dashboard</title>
+<style>
+  :root{
+    --paper:#EFE7D8; --panel:#FAF4E8; --panel-alt:#E9DCC5;
+    --ink:#24314F; --text:#2C2A26; --muted:#7A6F5C; --border:#D8C9AC;
+    --accent:#A9673A; --accent-dark:#8B5230; --accent-contrast:#fff;
+    --ok-bg:#E9EFE1; --ok-text:#3F6B3F; --ok-border:#C4D6B6;
+    --bad-bg:#F6E7DC; --bad-text:#A8442A; --bad-border:#E4BFA1;
+    --shadow:rgba(89,61,27,.10);
+  }
+  html[data-theme="dark"]{
+    --paper:#12151B; --panel:#1B1F27; --panel-alt:#20242D;
+    --ink:#EDE7DA; --text:#D9D4C8; --muted:#8B8778; --border:#2B2F38;
+    --accent:#D98A54; --accent-dark:#E39C6B; --accent-contrast:#1B140D;
+    --ok-bg:#1D2A20; --ok-text:#8FD1A0; --ok-border:#2E4530;
+    --bad-bg:#2B1E1A; --bad-text:#E2967A; --bad-border:#4A2E24;
+    --shadow:rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Segoe UI',system-ui,sans-serif;background:var(--paper);color:var(--text);}
+  a{color:var(--accent-dark)}
+  .wrap{max-width:1100px;margin:0 auto;padding:20px;}
+  .masthead{display:flex;align-items:baseline;justify-content:space-between;
+    border-bottom:2px solid var(--ink);padding-bottom:.6rem;margin-bottom:.2rem;}
+  .masthead h1{margin:0;font-size:1.7rem;color:var(--ink);}
+  .tag{font-size:.8rem;color:var(--muted);}
+  .sub{color:var(--muted);margin:.3rem 0 1.2rem;font-size:.92rem;}
+  .grid{display:grid;grid-template-columns:300px 1fr;gap:18px;}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    box-shadow:0 1px 3px var(--shadow);padding:14px;margin-bottom:14px;}
+  .label{font-size:.72rem;color:var(--muted);font-weight:600;text-transform:uppercase;
+    letter-spacing:.03em;margin-bottom:.4rem;}
+  .step{font-family:'IBM Plex Mono',monospace;font-size:.7rem;color:var(--accent-dark);
+    background:var(--panel-alt);border:1px solid var(--border);display:inline-block;
+    padding:.1rem .45rem;border-radius:4px;margin:0 0 .5rem;}
+  label{display:block;font-size:.85rem;margin:.5rem 0 .2rem;color:var(--text);}
+  select,input[type=text],input[type=number],textarea{
+    width:100%;padding:.5rem;border:1px solid var(--border);border-radius:7px;
+    background:var(--panel-alt);color:var(--text);font-size:.9rem;}
+  textarea{min-height:320px;font-family:'IBM Plex Mono',monospace;font-size:.82rem;white-space:pre;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  .chk{display:flex;align-items:center;gap:.4rem;font-size:.85rem;margin:.3rem 0;}
+  .chk input{width:auto}
+  button{cursor:pointer;border-radius:7px;font-weight:600;border:1px solid var(--border);
+    background:var(--panel);color:var(--text);padding:.55rem .9rem;font-size:.9rem;}
+  button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-contrast);width:100%;padding:.7rem;}
+  button.primary:hover{background:var(--accent-dark);border-color:var(--accent-dark);}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .pill{display:inline-flex;align-items:center;gap:.4rem;padding:.28rem .7rem;border-radius:999px;
+    font-size:.8rem;font-weight:600;border:1px solid var(--border);}
+  .pill.ok{color:var(--ok-text);background:var(--ok-bg);border-color:var(--ok-border);}
+  .pill.bad{color:var(--bad-text);background:var(--bad-bg);border-color:var(--bad-border);}
+  .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+  .mono{font-family:'IBM Plex Mono',monospace;font-size:.8rem;color:var(--muted);word-break:break-all;}
+  .drop{border:1.5px dashed var(--border);border-radius:10px;background:var(--panel-alt);
+    padding:22px;text-align:center;color:var(--muted);cursor:pointer;}
+  .drop.hover{border-color:var(--accent);color:var(--accent-dark);}
+  .status{padding:.6rem .8rem;border-radius:8px;margin:.4rem 0;font-size:.9rem;}
+  .status.ok{background:var(--ok-bg);color:var(--ok-text);border:1px solid var(--ok-border);}
+  .status.warn{background:var(--bad-bg);color:var(--bad-text);border:1px solid var(--bad-border);}
+  .tabs{display:flex;gap:6px;border-bottom:1px solid var(--border);margin-bottom:8px;}
+  .tabs button{border:none;background:none;color:var(--muted);padding:.5rem .7rem;border-radius:0;font-weight:600;}
+  .tabs button.active{color:var(--accent-dark);border-bottom:2px solid var(--accent);}
+  table{border-collapse:collapse;width:100%;font-size:.85rem;}
+  th,td{border:1px solid var(--border);padding:.35rem .5rem;text-align:left;}
+  th{background:var(--panel-alt);color:var(--ink);}
+  .dls{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;}
+  .spin{display:inline-block;width:16px;height:16px;border:3px solid var(--border);
+    border-top-color:var(--accent);border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:middle;}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .hidden{display:none}
+  .toggle{background:none;border:1px solid var(--border);padding:.35rem .6rem;border-radius:7px;font-size:.8rem;}
+  details{background:var(--panel-alt);border:1px solid var(--border);border-radius:8px;padding:.4rem .6rem;margin-top:.5rem;}
+  summary{cursor:pointer;font-weight:600;font-size:.85rem;color:var(--ink);}
+  .foot{color:var(--muted);font-size:.8rem;margin-top:14px;border-top:1px solid var(--border);padding-top:10px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <h1>🖹 OCR Toolkit <span class="tag">dashboard</span></h1>
+    <button class="toggle" id="themeBtn">🌙 Dark</button>
+  </div>
+  <div class="sub">Pure HTML client — OCR runs on the API server (Tesseract lives there).</div>
+
+  <div class="grid">
+    <!-- ============ SIDEBAR ============ -->
+    <div>
+      <div class="card">
+        <div class="label">Connection</div>
+        <label>API URL</label>
+        <input type="text" id="apiUrl" value="http://localhost:8000"/>
+        <div style="margin-top:.5rem">
+          <span class="pill bad" id="pill"><span class="dot"></span>Checking…</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="label">Recognition</div>
+        <label>Language</label>
+        <select id="lang"><option>eng</option></select>
+
+        <label>Preprocessing</label>
+        <div class="row">
+          <label class="chk"><input type="radio" name="prep" value="auto" checked/> Auto</label>
+          <label class="chk"><input type="radio" name="prep" value="manual"/> Manual</label>
+        </div>
+        <select id="manualMode" class="hidden">
+          <option>document</option><option>photo</option>
+          <option>lowcontrast</option><option>inverted</option><option>none</option>
+        </select>
+      </div>
+
+      <div class="card">
+        <div class="label">Output formats</div>
+        <div id="formats">
+          <label class="chk"><input type="checkbox" value="txt"/> txt</label>
+          <label class="chk"><input type="checkbox" value="md" checked/> md</label>
+          <label class="chk"><input type="checkbox" value="json" checked/> json</label>
+          <label class="chk"><input type="checkbox" value="html"/> html</label>
+          <label class="chk"><input type="checkbox" value="csv"/> csv</label>
+          <label class="chk"><input type="checkbox" value="xlsx" checked/> xlsx</label>
+          <label class="chk"><input type="checkbox" value="docx"/> docx</label>
+        </div>
+      </div>
+
+      <div class="card">
+        <details>
+          <summary>Advanced</summary>
+          <label>Tesseract PSM: <span id="psmVal">6</span></label>
+          <input type="range" id="psm" min="3" max="13" value="6"/>
+          <label class="chk"><input type="checkbox" id="detectTables" checked/> Detect tables</label>
+          <label>Table number style</label>
+          <div class="row">
+            <label class="chk"><input type="radio" name="locale" value="auto" checked/> auto</label>
+            <label class="chk"><input type="radio" name="locale" value="dot"/> dot</label>
+            <label class="chk"><input type="radio" name="locale" value="comma"/> comma</label>
+          </div>
+          <label class="chk"><input type="checkbox" id="fast" checked/> Fast mode (cap huge images)</label>
+          <label>Parallel workers (0 = auto)</label>
+          <input type="number" id="workers" min="0" max="16" value="0"/>
+        </details>
+      </div>
+    </div>
+
+    <!-- ============ MAIN ============ -->
+    <div>
+      <div class="card">
+        <span class="step">STEP 1 · UPLOAD</span>
+        <div class="drop" id="drop">
+          <div id="dropText">📤 Click or drag an image / PDF here</div>
+          <input type="file" id="file" class="hidden"
+            accept=".png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.pdf"/>
+        </div>
+        <div id="fileInfo" class="mono" style="margin-top:.5rem"></div>
+        <label class="chk" style="margin-top:.6rem">
+          <input type="checkbox" id="tableMode"/> 📊 Table mode — reproduce the table exactly as in the image/PDF
+        </label>
+      </div>
+
+      <div class="card">
+        <span class="step">STEP 2 · RUN</span>
+        <button class="primary" id="runBtn">Run OCR</button>
+        <div id="status"></div>
+      </div>
+
+      <div class="card hidden" id="resultsCard">
+        <span class="step">RESULTS</span>
+        <div class="tabs">
+          <button class="active" id="tabTextBtn">📝 Text</button>
+          <button id="tabTableBtn">📊 Table preview</button>
+        </div>
+        <div id="tabText"><textarea id="textOut" readonly></textarea></div>
+        <div id="tabTable" class="hidden" style="overflow:auto"></div>
+
+        <span class="step" style="margin-top:12px">STEP 3 · DOWNLOAD</span>
+        <div class="dls" id="downloads"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">This dashboard only sends files to the API and shows results.
+    Please review the output manually — OCR is not perfect.</div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let currentFile = null;
+
+// ---- theme ----
+$("themeBtn").onclick = () => {
+  const dark = document.documentElement.getAttribute("data-theme") === "dark";
+  document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+  $("themeBtn").textContent = dark ? "🌙 Dark" : "☀️ Light";
+};
+
+// ---- API URL persistence + health ----
+const savedUrl = localStorage.getItem("ocr_api_url");
+if (savedUrl) $("apiUrl").value = savedUrl;
+function apiBase(){ return $("apiUrl").value.replace(/\/+$/,""); }
+
+async function checkHealth(){
+  const pill = $("pill");
+  try{
+    const r = await fetch(apiBase()+"/health", {cache:"no-store"});
+    const j = await r.json();
+    if(j.status === "ok"){ pill.className="pill ok"; pill.innerHTML='<span class="dot"></span>Connected'; loadLanguages(); return; }
+    throw 0;
+  }catch(e){
+    pill.className="pill bad"; pill.innerHTML='<span class="dot"></span>Not reachable';
+  }
+}
+async function loadLanguages(){
+  try{
+    const r = await fetch(apiBase()+"/languages");
+    const j = await r.json();
+    const sel = $("lang"); sel.innerHTML="";
+    (j.languages||["eng"]).forEach(l=>{ const o=document.createElement("option"); o.textContent=l; sel.appendChild(o); });
+  }catch(e){ /* keep default */ }
+}
+$("apiUrl").addEventListener("change", ()=>{ localStorage.setItem("ocr_api_url",$("apiUrl").value); checkHealth(); });
+
+// ---- preprocessing radio ----
+document.querySelectorAll('input[name="prep"]').forEach(r=>{
+  r.addEventListener("change", ()=>{
+    $("manualMode").classList.toggle("hidden", document.querySelector('input[name="prep"]:checked').value!=="manual");
+  });
+});
+$("psm").addEventListener("input", ()=> $("psmVal").textContent=$("psm").value);
+
+// ---- file upload (click + drag) ----
+const drop = $("drop");
+drop.onclick = ()=> $("file").click();
+$("file").addEventListener("change", e=> setFile(e.target.files[0]));
+["dragover","dragenter"].forEach(ev=> drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.add("hover");}));
+["dragleave","drop"].forEach(ev=> drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.remove("hover");}));
+drop.addEventListener("drop", e=> setFile(e.dataTransfer.files[0]));
+function setFile(f){
+  if(!f) return;
+  currentFile = f;
+  $("dropText").textContent = "✅ "+f.name;
+  $("fileInfo").innerHTML = `name: ${f.name}<br>type: ${f.type||"unknown"}<br>size: ${(f.size/1e6).toFixed(2)} MB`;
+}
+
+// ---- tabs ----
+$("tabTextBtn").onclick = ()=> switchTab("text");
+$("tabTableBtn").onclick = ()=> switchTab("table");
+function switchTab(t){
+  $("tabTextBtn").classList.toggle("active", t==="text");
+  $("tabTableBtn").classList.toggle("active", t==="table");
+  $("tabText").classList.toggle("hidden", t!=="text");
+  $("tabTable").classList.toggle("hidden", t!=="table");
+}
+
+// ---- run OCR ----
+$("runBtn").onclick = runOCR;
+async function runOCR(){
+  if(!currentFile){ setStatus("warn","⚠️ Please upload an image or PDF first."); return; }
+  const formats = [...document.querySelectorAll('#formats input:checked')].map(c=>c.value);
+  if(formats.length===0){ setStatus("warn","⚠️ Pick at least one output format."); return; }
+
+  const prep = document.querySelector('input[name="prep"]:checked').value;
+  const mode = prep==="auto" ? "auto" : $("manualMode").value;
+  const locale = document.querySelector('input[name="locale"]:checked').value;
+
+  const fd = new FormData();
+  fd.append("file", currentFile);
+  fd.append("lang", $("lang").value);
+  fd.append("mode", mode);
+  fd.append("psm", $("psm").value);
+  fd.append("detect_tables", $("detectTables").checked);
+  fd.append("table_mode", $("tableMode").checked);
+  fd.append("locale", locale);
+  fd.append("formats", formats.join(","));
+  fd.append("fast", $("fast").checked);
+  fd.append("workers", $("workers").value);
+
+  $("runBtn").disabled = true;
+  setStatus("ok",'<span class="spin"></span> Sending to OCR server… (large files take longer)');
+  const t0 = performance.now();
+  try{
+    const r = await fetch(apiBase()+"/ocr", {method:"POST", body:fd});
+    if(!r.ok){ const t = await r.text(); setStatus("warn","❌ Server error "+r.status+": "+t.slice(0,200)); return; }
+    const out = await r.json();
+    const secs = ((performance.now()-t0)/1000).toFixed(1);
+    if(!out.ok){ setStatus("warn", out.status||"No result."); return; }
+    setStatus("ok", "✅ "+(out.status||"Done.")+"  ⏱️ "+secs+"s");
+    showResults(out);
+  }catch(e){
+    setStatus("warn","❌ Request failed: "+e+" (is the API URL correct & reachable?)");
+  }finally{
+    $("runBtn").disabled = false;
+  }
+}
+function setStatus(kind, html){
+  $("status").innerHTML = `<div class="status ${kind}">${html}</div>`;
+}
+
+// ---- render results ----
+function showResults(out){
+  $("resultsCard").classList.remove("hidden");
+  $("textOut").value = out.text || "(no text detected)";
+  // table preview
+  const tt = $("tabTable");
+  if(out.table && out.table.length){
+    const [head, ...rows] = out.table;
+    let h = "<table><thead><tr>"+head.map(c=>`<th>${esc(c)}</th>`).join("")+"</tr></thead><tbody>";
+    h += rows.map(r=>"<tr>"+r.map(c=>`<td>${esc(c)}</td>`).join("")+"</tr>").join("");
+    h += "</tbody></table>";
+    tt.innerHTML = h;
+  }else{
+    tt.innerHTML = '<div class="mono">No table detected in this file.</div>';
+  }
+  switchTab("text");
+  // downloads (decode base64 -> Blob)
+  const dl = $("downloads"); dl.innerHTML="";
+  const icons = {txt:"📄",md:"📝",json:"🗂️",html:"🌐",csv:"📊",xlsx:"📈",docx:"📃"};
+  const files = out.files || {};
+  const keys = Object.keys(files);
+  if(keys.length===0){ dl.innerHTML='<div class="mono">No output files were produced.</div>'; return; }
+  keys.forEach(fmt=>{
+    const info = files[fmt];
+    if(!info || !info.b64) return;
+    const btn = document.createElement("button");
+    btn.innerHTML = (icons[fmt]||"📁")+" "+fmt.toUpperCase();
+    btn.onclick = ()=> downloadB64(info.b64, info.name, fmt);
+    dl.appendChild(btn);
+  });
+}
+function downloadB64(b64, name, fmt){
+  const mimes = {
+    txt:"text/plain", md:"text/markdown", json:"application/json", html:"text/html",
+    csv:"text/csv",
+    xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  };
+  const bytes = Uint8Array.from(atob(b64), c=>c.charCodeAt(0));
+  const blob = new Blob([bytes], {type: mimes[fmt]||"application/octet-stream"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; document.body.appendChild(a); a.click();
+  a.remove(); URL.revokeObjectURL(url);
+}
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+// init
+checkHealth();
+</script>
+</body>
+</html>

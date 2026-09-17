@@ -1,0 +1,73 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: ocr-api-v2
+
+    expose:
+      - "8491"
+
+    environment:
+      TESSDATA_PREFIX: "/usr/share/tesseract-ocr/5/tessdata"
+      MAX_UPLOAD_MB: "50"
+      OCR_MAX_WORKERS: "6"
+      OCR_PDF_DPI: "250"
+      OCR_MAX_IMAGE_DIM: "3200"
+      OCR_WORKDIR: "/tmp/ocr-api"
+      ENVIRONMENT: "production"
+      LOG_LEVEL: "INFO"
+
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8491/ready')"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+    restart: unless-stopped
+
+    networks:
+      - ocr-internal
+
+    security_opt:
+      - "no-new-privileges:true"
+
+    tmpfs:
+      - "/tmp/ocr-api:size=4g,mode=1777"
+
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    container_name: ocr-client-v2
+
+    ports:
+      - "8067:8501"
+
+    environment:
+        OCR_API_URL: "http://api:8491"
+        MAX_UPLOAD_MB: "5"
+        API_CONNECT_TIMEOUT: "5"
+        API_READ_TIMEOUT: "900"
+        API_HEALTH_RETRIES: "3"
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+    networks:
+      - ocr-internal
+
+    security_opt:
+      - "no-new-privileges:true"
+
+networks:
+  ocr-internal:
+    driver: bridge

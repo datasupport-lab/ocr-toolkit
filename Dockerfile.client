@@ -1,0 +1,18 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV OCR_API_URL=http://api:8491
+
+WORKDIR /app
+
+COPY requirements_client.txt .
+
+RUN pip install --no-cache-dir -r requirements_client.txt
+
+COPY src/streamlit_client.py /app/src/streamlit_client.py
+
+WORKDIR /app/src
+
+EXPOSE 8067
+CMD ["streamlit", "run", "streamlit_client.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false"]

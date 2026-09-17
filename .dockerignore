@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+ocrenv/
+ocr_out/
+*.xlsx
+*.md.bak
+.git/
+.DS_Store
+tessdata/
+tools/
