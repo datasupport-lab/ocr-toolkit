@@ -1,3 +1,4 @@
+# + the Tesseract SYSTEM binary (apt/brew/UB-Mannheim)
 # Backend (API server) — install where Tesseract lives
 pytesseract>=0.3.10
 opencv-python-headless>=4.8
@@ -5,11 +6,21 @@ numpy>=1.24,<2.0
 Pillow>=10.0
 pandas>=2.2,<3
 openpyxl>=3.1
+python-docx>=1.1,<2
 lxml>=5.0
 beautifulsoup4>=4.12
 PyMuPDF>=1.24
+
+# API + concurrency
 fastapi>=0.110
 uvicorn>=0.29
+gunicorn>=21.2
 python-multipart>=0.0.9
-python-docx>=1.1,<2
-# + the Tesseract SYSTEM binary (apt/brew/UB-Mannheim)
+
+# Shared job state
+redis>=5.0
+
+# Optional Gemini enhancement (only used if GEMINI_ENABLED=true)
+google-generativeai>=0.7
+
+# + the Tesseract SYSTEM binary (installed via apt in Dockerfile.api)

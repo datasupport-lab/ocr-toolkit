@@ -9,12 +9,28 @@ services:
       - "${API_CONTAINER_PORT}"
 
     environment:
+      # --- Tesseract / OCR ---
       TESSDATA_PREFIX: "${TESSDATA_PREFIX}"
       MAX_UPLOAD_MB: "${MAX_UPLOAD_MB}"
       OCR_MAX_WORKERS: "${OCR_MAX_WORKERS}"
       OCR_PDF_DPI: "${OCR_PDF_DPI}"
       OCR_MAX_IMAGE_DIM: "${OCR_MAX_IMAGE_DIM}"
       OCR_WORKDIR: "${OCR_WORKDIR}"
+      OCR_JOB_TTL_MINUTES: "${OCR_JOB_TTL_MINUTES}"
+
+      # --- Multi-worker (Gunicorn) ---
+      API_PROCESS_WORKERS: "${API_PROCESS_WORKERS}"
+      API_CONTAINER_PORT: "${API_CONTAINER_PORT}"
+
+      # --- Shared job state ---
+      REDIS_URL: "${REDIS_URL}"
+
+      # --- Gemini (BACKEND-CONTROLLED ONLY) ---
+      GEMINI_ENABLED: "${GEMINI_ENABLED}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY}"
+      GEMINI_MODEL: "${GEMINI_MODEL}"
+
+      # --- Runtime ---
       ENVIRONMENT: "${ENVIRONMENT}"
       LOG_LEVEL: "${LOG_LEVEL}"
 
@@ -31,14 +47,32 @@ services:
 
     restart: unless-stopped
 
+    depends_on:
+      - redis
+
     networks:
       - ocr-internal
 
     security_opt:
       - "no-new-privileges:true"
 
-    tmpfs:
-      - "/tmp/ocr-api:size=${OCR_TMPFS_SIZE},mode=1777"
+    # Shared volume so any worker can read job output files.
+    volumes:
+      - ocr-data:/tmp/ocr-api
+
+    deploy:
+      resources:
+        limits:
+          memory: "${API_MEMORY_LIMIT}"
+
+  redis:
+    image: redis:7-alpine
+    container_name: ocr-redis
+    restart: unless-stopped
+    networks:
+      - ocr-internal
+    security_opt:
+      - "no-new-privileges:true"
 
   client:
     build:
@@ -70,3 +104,6 @@ services:
 networks:
   ocr-internal:
     driver: bridge
+
+volumes:
+  ocr-data:

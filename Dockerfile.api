@@ -1,21 +1,22 @@
 FROM python:3.12-slim
 
+# --- system deps: Tesseract engine + language packs + libs OpenCV/PyMuPDF need ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr \
-    tesseract-ocr-eng \
-    tesseract-ocr-ind \
-    tesseract-ocr-osd \
-    libgl1 \
-    libglib2.0-0 \
-    poppler-utils \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        tesseract-ocr-ind \
+        tesseract-ocr-osd \
+        libgl1 \
+        libglib2.0-0 \
+        poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-RUN groupadd --system ocr && \
-    useradd --system --gid ocr --create-home ocr
+# Non-root user for security
+RUN groupadd --system ocr && useradd --system --gid ocr --create-home ocr
 
 WORKDIR /app
 
@@ -23,6 +24,8 @@ COPY requirements_api.txt .
 RUN pip install --no-cache-dir -r requirements_api.txt
 
 COPY --chown=ocr:ocr src/ ./src/
+COPY --chown=ocr:ocr start_api.sh /app/start_api.sh
+RUN chmod +x /app/start_api.sh
 
 RUN mkdir -p /tmp/ocr-api && chown -R ocr:ocr /tmp/ocr-api /app
 
@@ -32,4 +35,6 @@ WORKDIR /app/src
 
 EXPOSE 8491
 
-CMD ["uvicorn","api_server:app","--host","0.0.0.0","--port","8491","--proxy-headers"]
+# Multi-worker via Gunicorn + Uvicorn workers.
+# --timeout 0 because OCR of large PDFs can take a long time.
+CMD ["/app/start_api.sh"]

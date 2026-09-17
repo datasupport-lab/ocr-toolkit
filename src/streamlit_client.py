@@ -644,148 +644,229 @@ def main():
 
     if run:
         if up is None:
-            st.warning("⚠️ Please upload an image or PDF first."); return
+            st.warning("⚠️ Please upload an image or PDF first.")
+            return
         if not ok:
-            with st.spinner(
-                "Checking the OCR service..."
-            ):
-                reconnected, message = (
-                    check_api_health(
-                        api_url,
-                        retries=API_HEALTH_RETRIES,
-                    )
+            with st.spinner("Checking the OCR service..."):
+                reconnected, message = check_api_health(
+                    api_url, retries=API_HEALTH_RETRIES
                 )
-
             if not reconnected:
-                st.session_state[
-                    "api_connected"
-                ] = False
-
+                st.session_state["api_connected"] = False
                 st.error(
                     "The OCR service is not available. "
-                    f"{message} Use Reconnect API in "
-                    "the sidebar after the service "
-                    "has recovered."
+                    f"{message} Use Reconnect API in the sidebar."
                 )
-
                 return
-
-            st.session_state[
-                "api_connected"
-            ] = True
-
             ok = True
         if not export_formats:
-            st.warning("⚠️ Pick at least one output format."); return
+            st.warning("⚠️ Pick at least one output format.")
+            return
 
-        files = {"file": (up.name, up.getbuffer(), up.type or "application/octet-stream")}
+        session = get_http_session()
+
+        files = {
+            "file": (
+                up.name,
+                up.getbuffer(),
+                up.type or "application/octet-stream",
+            )
+        }
         data = {
-            "lang": lang, "mode": mode_val, "psm": int(psm),
+            "lang": lang,
+            "mode": mode_val,
+            "psm": int(psm),
             "detect_tables": str(bool(detect_tables)).lower(),
             "table_mode": str(bool(table_mode)).lower(),
             "locale": locale,
             "formats": ",".join(export_formats),
             "fast": str(bool(fast)).lower(),
-            
         }
 
-        t0 = time.time()
-        with st.spinner("Sending to OCR server… (large files take longer)"):
+        # ---- STEP A: submit the job ----
+        try:
+            submit = session.post(
+                f"{api_url}/ocr",
+                files=files,
+                data=data,
+                timeout=(API_CONNECT_TIMEOUT, 60),
+            )
+        except requests.ConnectionError:
+            st.session_state["api_connected"] = False
+            st.error(
+                "The connection to the OCR service was lost. "
+                "Use Reconnect API in the sidebar."
+            )
+            return
+        except requests.RequestException as exc:
+            st.error(f"Failed to submit the job: {type(exc).__name__}.")
+            return
+
+        if submit.status_code != 200:
             try:
-                session = get_http_session()
+                detail = submit.json().get("detail", submit.text[:300])
+            except ValueError:
+                detail = submit.text[:300]
+            st.error(f"Server error {submit.status_code}: {detail}")
+            return
 
-                resp = session.post(
-                    f"{api_url}/ocr",
-                    files=files,
-                    data=data,
-                    timeout=(
-                        API_CONNECT_TIMEOUT,
-                        API_READ_TIMEOUT,
-                    ),
+        submitted = submit.json()
+        job_id = submitted.get("job_id")
+        if not job_id:
+            st.error("The API did not return a job_id.")
+            return
+
+        # Remember the job so we can reconnect to it later.
+        st.session_state["last_job_id"] = job_id
+
+        # ---- STEP B: poll status with a real progress bar ----
+        st.markdown(
+            '<span class="ocr-step">PROCESSING</span>',
+            unsafe_allow_html=True,
+        )
+        progress_bar = st.progress(0)
+        status_line = st.empty()
+
+        t0 = time.time()
+        result = None
+
+        while True:
+            try:
+                status_resp = session.get(
+                    f"{api_url}/ocr/{job_id}/status",
+                    timeout=(API_CONNECT_TIMEOUT, 15),
                 )
-            except requests.ConnectionError:
-                st.session_state[
-                    "api_connected"
-                ] = False
-
-                st.error(
-                    "The connection to the OCR service "
-                    "was lost. The API container may be "
-                    "restarting. Use Reconnect API in "
-                    "the sidebar."
+            except requests.RequestException:
+                st.session_state["api_connected"] = False
+                status_line.error(
+                    "Lost connection while processing. "
+                    "Use Reconnect API, then check the job again."
                 )
-
                 return
 
-            except requests.Timeout:
-                st.error(
-                    "The OCR request exceeded the client "
-                    "timeout. The API may still be busy. "
-                    "Check the API status before submitting "
-                    "the document again."
+            if status_resp.status_code != 200:
+                status_line.error(
+                    f"Status check failed (HTTP {status_resp.status_code})."
                 )
-
                 return
 
-            except requests.RequestException as exc:
-                st.error(
-                    "The OCR request failed due to a "
-                    "network error: "
-                    f"{type(exc).__name__}."
-                )
+            info = status_resp.json()
+            state = info.get("status", "unknown")
+            percent = int(info.get("percent", 0))
+            done_pages = info.get("completed_pages", 0)
+            total_pages = info.get("total_pages", 0)
 
+            progress_bar.progress(min(max(percent, 0), 100))
+
+            if state == "processing" and total_pages:
+                status_line.info(
+                    f"Processing page {done_pages} of {total_pages}..."
+                )
+            elif state == "queued":
+                status_line.info("Queued, waiting to start...")
+            elif state == "error":
+                status_line.error(
+                    "Processing failed: "
+                    + str(info.get("error", "unknown error"))
+                )
                 return
+            elif state == "completed":
+                progress_bar.progress(100)
+                break
+
+            # Safety timeout on the client side.
+            if time.time() - t0 > API_READ_TIMEOUT:
+                status_line.error(
+                    "Processing is taking too long. "
+                    "Check the job later via Reconnect."
+                )
+                return
+
+            time.sleep(1.2)
+
+        # ---- STEP C: fetch the final result ----
+        try:
+            result_resp = session.get(
+                f"{api_url}/ocr/{job_id}/result",
+                timeout=(API_CONNECT_TIMEOUT, 30),
+            )
+            result = result_resp.json()
+        except requests.RequestException:
+            st.error("Failed to fetch the result. Try Reconnect.")
+            return
+
+        if not result.get("ok"):
+            st.warning(result.get("status", "No result."))
+            return
+
         elapsed = time.time() - t0
 
-        if resp.status_code != 200:
-            st.error(f"❌ Server error {resp.status_code}: {resp.text[:300]}"); return
-        out = resp.json()
-        if not out.get("ok"):
-            st.warning(out.get("status", "No result.")); return
-
-        st.markdown('<span class="ocr-step">RESULTS</span>', unsafe_allow_html=True)
+        # ---- RESULTS ----
+        st.markdown(
+            '<span class="ocr-step">RESULTS</span>',
+            unsafe_allow_html=True,
+        )
         with st.container(border=True):
             m1, m2 = st.columns([3, 1])
             with m1:
-                st.success(out.get("status", "Done."))
+                st.success(result.get("status", "Done."))
             with m2:
                 st.metric("Elapsed", f"{elapsed:.1f}s")
 
+            engine = result.get("engine", "tesseract")
+            confidence = result.get("mean_confidence")
+            if confidence is not None:
+                st.caption(
+                    f"Engine: {engine} · confidence indicator: {confidence:.1f}"
+                )
+            if result.get("review_recommended"):
+                st.warning(
+                    "Manual review recommended. Check names, dates, "
+                    "amounts, codes, and table totals."
+                )
+
             t1, t2 = st.tabs(["📝 Text", "📊 Table preview"])
             with t1:
-                st.text_area("Extracted text", out.get("text", ""), height=360,
-                             label_visibility="collapsed")
+                st.text_area(
+                    "Extracted text",
+                    result.get("text", ""),
+                    height=360,
+                    label_visibility="collapsed",
+                )
             with t2:
-                tbl = out.get("table")
+                tbl = result.get("table")
                 if tbl:
                     import pandas as pd
                     header, *rows = tbl
-                    st.dataframe(pd.DataFrame(rows, columns=header),
-                                 use_container_width=True)
+                    st.dataframe(
+                        pd.DataFrame(rows, columns=header),
+                        use_container_width=True,
+                    )
                 else:
                     st.info("No table detected in this file.")
 
-        # ---- OUTPUT: one download button per produced format ----
-        st.markdown('<span class="ocr-step">STEP 3 · DOWNLOAD</span>', unsafe_allow_html=True)
+        # ---- DOWNLOAD ----
+        st.markdown(
+            '<span class="ocr-step">DOWNLOAD</span>',
+            unsafe_allow_html=True,
+        )
         with st.container(border=True):
-            files_out = out.get("files", {})
+            files_out = result.get("files", {})
             if not files_out:
                 st.info("No output files were produced.")
             else:
                 cols = st.columns(min(len(files_out), 4) or 1)
-                for i, (fmt, info) in enumerate(files_out.items()):
-                    if not info or not info.get("b64"):
+                for i, (fmt, meta) in enumerate(files_out.items()):
+                    if not meta or not meta.get("b64"):
                         continue
                     with cols[i % len(cols)]:
                         st.download_button(
                             f"{_ICON.get(fmt, '📁')} {fmt.upper()}",
-                            base64.b64decode(info["b64"]),
-                            file_name=info["name"],
+                            base64.b64decode(meta["b64"]),
+                            file_name=meta["name"],
                             mime=_MIME.get(fmt, "application/octet-stream"),
-                            use_container_width=True)
-
-    st.divider()
-    st.caption("This app is not perfect — please also review and check the output manually after using it.")
+                            use_container_width=True,
+                        )
 
 
 if __name__ == "__main__":
