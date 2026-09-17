@@ -14,5 +14,5 @@ COPY src/streamlit_client.py /app/src/streamlit_client.py
 
 WORKDIR /app/src
 
-EXPOSE 8067
+EXPOSE 8501
 CMD ["streamlit", "run", "streamlit_client.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false"]

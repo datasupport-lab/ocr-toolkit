@@ -28,10 +28,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # --- app source ---
 COPY src/ ./src/
 
-EXPOSE 8501
+EXPOSE 8067
 
 # Streamlit web UI. --server.address 0.0.0.0 so Docker can expose it.
 WORKDIR /app/src
 CMD ["streamlit", "run", "streamlit_app.py", \
-     "--server.address=0.0.0.0", "--server.port=8501", \
+     "--server.address=0.0.0.0", "--server.port=8067", \
      "--server.headless=true", "--browser.gatherUsageStats=false"]

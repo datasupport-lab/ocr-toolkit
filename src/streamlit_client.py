@@ -250,7 +250,7 @@ def inject_style(mode: str):
     div[data-baseweb="select"] input {{ color: var(--text) !important; }}
     div[data-baseweb="select"] svg {{ fill: var(--muted) !important; }}
 
-        /* dropdown popover container */
+         /* dropdown popover container */
     div[data-baseweb="popover"],
     div[data-baseweb="popover"] > div,
     div[data-baseweb="popover"] div[data-baseweb="menu"],
@@ -334,6 +334,28 @@ def inject_style(mode: str):
     }}
 
     hr {{ border-color: var(--border); }}
+        /* ============================================================
+       Dropdown/menu background stays dark in both themes.
+       Force option text to WHITE so it is always readable.
+       ============================================================ */
+    div[data-baseweb="popover"] li,
+    ul[role="listbox"] li,
+    li[role="option"],
+    div[data-baseweb="popover"] li *,
+    ul[role="listbox"] li *,
+    li[role="option"] * {{
+        color: #FFFFFF !important;
+        opacity: 1 !important;
+    }}
+
+    li[role="option"]:hover,
+    li[aria-selected="true"] {{
+        background-color: #3A3A3A !important;
+    }}
+    li[role="option"]:hover *,
+    li[aria-selected="true"] * {{
+        color: #FFFFFF !important;
+    }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -454,7 +476,7 @@ def get_http_session() -> requests.Session:
 def main():
     st.set_page_config(page_title="OCR Toolkit", page_icon="🖹", layout="wide")
 
-    st.session_state.setdefault("dark_mode", False)
+    st.session_state.setdefault("dark_mode", True)
     mode = "dark" if st.session_state["dark_mode"] else "light"
     inject_style(mode)
     st.session_state.setdefault(
