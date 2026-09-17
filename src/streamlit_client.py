@@ -250,21 +250,38 @@ def inject_style(mode: str):
     div[data-baseweb="select"] input {{ color: var(--text) !important; }}
     div[data-baseweb="select"] svg {{ fill: var(--muted) !important; }}
 
-    /* dropdown menu that opens below select/multiselect */
+        /* dropdown popover container */
+    div[data-baseweb="popover"],
+    div[data-baseweb="popover"] > div,
     div[data-baseweb="popover"] div[data-baseweb="menu"],
     div[data-baseweb="popover"] ul,
     ul[role="listbox"] {{
         background-color: var(--panel) !important;
         border: 1px solid var(--border) !important;
     }}
-    ul[role="listbox"] li,
-    li[role="option"] {{ background-color: transparent !important; color: var(--text) !important; }}
-    li[role="option"]:hover, li[aria-selected="true"] {{ background-color: var(--panel-alt) !important; }}
 
-    /* multiselect chips/tags — Streamlit's default red, recolored to the accent */
-    span[data-baseweb="tag"] {{
-        background-color: var(--accent) !important;
-        border-radius: 6px !important;
+    /* every option row */
+    div[data-baseweb="popover"] li,
+    ul[role="listbox"] li,
+    li[role="option"] {{
+        background-color: var(--panel) !important;
+        color: var(--text) !important;
+        opacity: 1 !important;
+    }}
+
+    /* force any nested text/span/div inside an option to use readable color */
+    div[data-baseweb="popover"] li *,
+    ul[role="listbox"] li *,
+    li[role="option"] * {{
+        color: var(--text) !important;
+        opacity: 1 !important;
+    }}
+
+    /* hover + selected states */
+    li[role="option"]:hover,
+    li[aria-selected="true"] {{
+        background-color: var(--panel-alt) !important;
+        color: var(--ink) !important;
     }}
     span[data-baseweb="tag"] span,
     span[data-baseweb="tag"] div {{ color: var(--accent-contrast) !important; }}
@@ -545,7 +562,6 @@ def main():
         st.markdown("<br>", unsafe_allow_html=True)
         with st.expander("Advanced", expanded=False):
             psm = st.slider("Tesseract PSM", 1, 10, 6, 1)
-            detect_tables = st.checkbox("Detect tables", value=True)
             locale = st.radio("Table number style", ["auto", "dot", "comma"],
                               index=0, horizontal=True)
             fast = st.checkbox("Fast mode (cap huge images)", value=True,
@@ -560,11 +576,30 @@ def main():
                               type=["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "pdf"],
                               label_visibility="collapsed")
 
-        table_mode = st.toggle(
-            "📊 Table mode — reproduce the table exactly as in the image/PDF",
-            value=False,
-            help="Turn on when the file is mainly a table. Keeps the on-page "
-                 "row/column layout and exports it.")
+        table_handling = st.selectbox(
+            "Table handling",
+            options=[
+                "Text only (fastest)",
+                "Detect tables in text",
+                "Table mode (reproduce layout)",
+            ],
+            index=0,
+            help=(
+                "Text only: OCR teks saja, tanpa deteksi tabel. "
+                "Detect tables: cari tabel di dalam dokumen biasa. "
+                "Table mode: dokumen memang berupa tabel dan "
+                "pertahankan tata letak baris/kolomnya."
+            ),
+        )
+
+        detect_tables = (
+            table_handling == "Detect tables in text"
+        )
+
+        table_mode = (
+            table_handling
+            == "Table mode (reproduce layout)"
+        )
 
         if up is not None:
             st.divider()

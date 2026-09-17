@@ -523,7 +523,7 @@ async def ocr_endpoint(
     lang: str = Form("eng"),
     mode: str = Form("auto"),
     psm: int = Form(6),
-    detect_tables: bool = Form(True),
+    detect_tables: bool = Form(False),
     table_mode: bool = Form(False),
     locale: str = Form("auto"),
     formats: str = Form("md,xlsx,json"),
