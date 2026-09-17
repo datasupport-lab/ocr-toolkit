@@ -6,24 +6,24 @@ services:
     container_name: ocr-api-v2
 
     expose:
-      - "8491"
+      - "${API_CONTAINER_PORT}"
 
     environment:
-      TESSDATA_PREFIX: "/usr/share/tesseract-ocr/5/tessdata"
-      MAX_UPLOAD_MB: "50"
-      OCR_MAX_WORKERS: "6"
-      OCR_PDF_DPI: "250"
-      OCR_MAX_IMAGE_DIM: "3200"
-      OCR_WORKDIR: "/tmp/ocr-api"
-      ENVIRONMENT: "production"
-      LOG_LEVEL: "INFO"
+      TESSDATA_PREFIX: "${TESSDATA_PREFIX}"
+      MAX_UPLOAD_MB: "${MAX_UPLOAD_MB}"
+      OCR_MAX_WORKERS: "${OCR_MAX_WORKERS}"
+      OCR_PDF_DPI: "${OCR_PDF_DPI}"
+      OCR_MAX_IMAGE_DIM: "${OCR_MAX_IMAGE_DIM}"
+      OCR_WORKDIR: "${OCR_WORKDIR}"
+      ENVIRONMENT: "${ENVIRONMENT}"
+      LOG_LEVEL: "${LOG_LEVEL}"
 
     healthcheck:
       test:
         - "CMD"
         - "python"
         - "-c"
-        - "import urllib.request; urllib.request.urlopen('http://localhost:8491/ready')"
+        - "import os, urllib.request; urllib.request.urlopen('http://localhost:' + os.environ['API_CONTAINER_PORT'] + '/ready')"
       interval: 30s
       timeout: 10s
       retries: 5
@@ -38,7 +38,7 @@ services:
       - "no-new-privileges:true"
 
     tmpfs:
-      - "/tmp/ocr-api:size=4g,mode=1777"
+      - "/tmp/ocr-api:size=${OCR_TMPFS_SIZE},mode=1777"
 
   client:
     build:
@@ -47,18 +47,17 @@ services:
     container_name: ocr-client-v2
 
     ports:
-      - "8067:8501"
+      - "${CLIENT_HOST_PORT}:${CLIENT_CONTAINER_PORT}"
 
     environment:
-        OCR_API_URL: "http://api:8491"
-        MAX_UPLOAD_MB: "5"
-        API_CONNECT_TIMEOUT: "5"
-        API_READ_TIMEOUT: "900"
-        API_HEALTH_RETRIES: "3"
+      OCR_API_URL: "${OCR_API_URL}"
+      MAX_UPLOAD_MB: "${MAX_UPLOAD_MB}"
+      API_CONNECT_TIMEOUT: "${API_CONNECT_TIMEOUT}"
+      API_READ_TIMEOUT: "${API_READ_TIMEOUT}"
+      API_HEALTH_RETRIES: "${API_HEALTH_RETRIES}"
 
     depends_on:
-      api:
-        condition: service_healthy
+      - api
 
     restart: unless-stopped
 
